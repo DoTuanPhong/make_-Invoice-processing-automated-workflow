@@ -57,11 +57,11 @@ flowchart TD
     D -->|"◉ row"| E["💬 Notify Team<br/>Slack message"]
     E --> F{"💰 totalAmount > 1000?"}
 
-    F -->|"✔ [true]"| G["💬 Request Approval<br/>Slack → approver"]
-    G --> H["⏳ Wait for Approval<br/>webhook URL runtime"]
+    F -->|"✔ [true]"| G["💬 Request Approval<br/>Slack → approver<br/>includes {{ $execution.resumeUrl }}"]
+    G --> H["⏳ Wait for Approval<br/>webhook URL runtime<br/>(pauses execution)"]
     H --> M{"Approval result"}
-    M -->|"approve"| I["📊 Update Invoice Status<br/>→ Approved"]
-    M -->|"reject"| I2["📊 Update Invoice Status<br/>→ Rejected"]
+    M -->|"approve<br/>POST {invoiceNumber, status:Approved}"| I["📊 Update Invoice Status<br/>match on Invoice Number<br/>→ Approved"]
+    M -->|"reject<br/>POST {invoiceNumber, status:Rejected}"| I2["📊 Update Invoice Status<br/>match on Invoice Number<br/>→ Rejected"]
 
     F -->|"✘ [else]"| J["📊 Auto-Approve<br/>→ Approved"]
 
@@ -130,8 +130,8 @@ flowchart TD
 | Log Invoice | validated row | Google Sheets row (14 cột, Pending) |
 | Notify | row | Slack message |
 | High Value? | `totalAmount` | true / false branch |
-| Wait | approval webhook | `{ approved: bool }` |
-| Update Status | approval result | Sheets row → Approved / Rejected |
+| Wait | approval webhook (`{{ $execution.resumeUrl }}`) | `{ invoiceNumber, status }` |
+| Update Status | approval result | Sheets row → Approved / Rejected (matched by Invoice Number) |
 
 ## Kiểm tra toán học (node Validate & Format)
 

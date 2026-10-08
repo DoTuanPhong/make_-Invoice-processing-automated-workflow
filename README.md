@@ -16,8 +16,21 @@ Workflow tự động xử lý hóa đơn: nhận hóa đơn → AI trích xuấ
 4. **Log Invoice** — Google Sheets (14 cột, status = Pending)
 5. **Notify Team** — Slack thông báo
 6. **High Value?** — totalAmount > 1000?
-   - **true** → Request Approval (Slack) → Wait for Approval → Update Invoice Status
+   - **true** → Request Approval (Slack, includes `{{ $execution.resumeUrl }}`) → Wait for Approval (webhook) → Update Invoice Status
    - **false** → Auto-Approve (Google Sheets → Approved)
+
+## Approval flow (high value)
+
+1. **Request Approval** posts to Slack with the runtime resume URL (`{{ $execution.resumeUrl }}`) and the invoice number.
+2. **Wait for Approval** pauses the execution (webhook URL generated at runtime).
+3. Approver POSTs JSON to the resume URL:
+   ```json
+   { "invoiceNumber": "INV-123", "status": "Approved" }
+   ```
+   (or `"status": "Rejected"`)
+4. **Update Invoice Status** finds the Google Sheets row by **Invoice Number** (`columns.matchingColumns`) and sets **Status** to `Approved` / `Rejected`.
+
+> Alternative (n8n-native): replace Request Approval + Wait with a single Slack node using operation **Send and Wait for Response** (`sendAndWait`) — approver clicks a button in Slack and the response flows through automatically. Requires Slack OAuth2 with interactivity configured.
 
 ## Files
 
@@ -68,13 +81,30 @@ Vendor · Bill To · Invoice Number · Invoice Date · Due Date · PO Number · 
 | Credential | Type | Dùng cho node |
 |---|---|---|
 | OpenAI | API key | AI Extract Invoice |
-| Google Sheets | OAuth | Log Invoice, Update Invoice Status, Auto-Approve |
-| Slack | OAuth | Notify Team, Request Approval |
+| Google Sheets | OAuth2 (hoặc Service Account) | Log Invoice, Update Invoice Status, Auto-Approve |
+| Slack | OAuth2 (hoặc Access Token) | Notify Team, Request Approval |
 
 ## Cấu hình cần điền
 
-- **Google Sheets:** Spreadsheet ID + Sheet name (tên tab)
-- **Slack:** channel (hiện để `#invoices`)
+- **Google Sheets:** Spreadsheet ID + Sheet name (tên tab) — hiện đang để trống ở 3 node Google Sheets (`documentId`, `sheetName`)
+- **Slack:** channel (hiện để `#invoices`, mode=name)
+
+## Còn lại để chạy được (cần user cung cấp)
+
+1. Tạo 3 credentials ở trên trong n8n
+2. Điền Spreadsheet ID + Sheet name vào Log Invoice / Update Invoice Status / Auto-Approve
+3. Tạo sheet với 14 cột: Vendor · Bill To · Invoice Number · Invoice Date · Due Date · PO Number · Payment Terms · Currency · Subtotal · Tax Rate · Tax Amount · Total Amount · Math Check · Status
+4. Activate workflow (hiện `active: false`) → webhook `POST /webhook/invoice-incoming` mới hoạt động
+5. Test với sample invoice
+
+## Đã sửa (lần này)
+
+- AI Extract Invoice: `resource: chat`, `operation: complete`, `prompt.messages`, `simplifyOutput`, `maxTokens: 4096` (config cũ `chatMessage`/`jsonOutput` không tồn tại trong n8n 2.42.4)
+- Validate & Format: đọc `item.message.content` (output đã simplify)
+- Wait for Approval: `resume: webhook` (tham số đúng, cũ dùng `waitUntil` sai)
+- Slack nodes: `select: channel`, `channelId: {mode: name, value: #invoices}` (resourceLocator, cũ dùng `channel` sai)
+- Update Invoice Status / Auto-Approve: `columns.matchingColumns: ["Invoice Number"]` + giá trị match trong `columns.value` (bắt buộc với Google Sheets v4 update)
+- Request Approval: message có kèm `{{ $execution.resumeUrl }}` + hướng dẫn approver POST `{invoiceNumber, status}`
 
 ## Kiểm tra toán học (mathCheck)
 
