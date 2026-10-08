@@ -1,0 +1,74 @@
+{
+  "samples": [
+    {
+      "case": "1_hop_le_duoi_nguong_tu_dong_duyet",
+      "payload": {
+        "invoice_number": "INV-2026-001",
+        "vendor_name": "ACB Supply Co",
+        "vendor_email": "ap@acbsupply.example",
+        "invoice_date": "2026-10-01",
+        "due_date": "2026-10-31",
+        "currency": "VND",
+        "subtotal": 42000000,
+        "tax_total": 4200000,
+        "total_amount": 46200000,
+        "po_number": "PO-7788",
+        "line_items": [
+          {
+            "description": "Office chairs",
+            "quantity": 20,
+            "unit_price": 2100000,
+            "amount": 42000000
+          }
+        ],
+        "file_url": "https://example.com/invoices/INV-2026-001.pdf",
+        "source": "api"
+      },
+      "expected": "status=success, approval_required=false (46.200.000 < 50.000.000 default)"
+    },
+    {
+      "case": "2_vuot_nguong_can_phe_duyet",
+      "payload": {
+        "invoice_number": "INV-2026-002",
+        "vendor_name": "Global Tech Services Ltd",
+        "vendor_email": "billing@globaltech.example",
+        "invoice_date": "2026-10-03",
+        "due_date": "2026-11-02",
+        "currency": "USD",
+        "subtotal": 8500,
+        "tax_total": 0,
+        "total_amount": 12750,
+        "po_number": "PO-9901",
+        "line_items": [
+          {
+            "description": "Consulting services - October",
+            "quantity": 1,
+            "unit_price": 8500,
+            "amount": 8500
+          },
+          {
+            "description": "Support package (45%)",
+            "quantity": 1,
+            "unit_price": 4250,
+            "amount": 4250
+          }
+        ],
+        "file_url": "https://example.com/invoices/INV-2026-002.pdf",
+        "source": "email"
+      },
+      "expected": "approval_required=true, gui Slack/Email kèm link approve/reject, doi Wait for webhook"
+    },
+    {
+      "case": "3_khong_hop_le_thieu_tong_tien",
+      "payload": {
+        "invoice_number": "INV-2026-003",
+        "vendor_name": "QuickPrint Shop",
+        "invoice_date": "2026-10-05",
+        "currency": "VND",
+        "total_amount": 0,
+        "source": "manual"
+      },
+      "expected": "status=exception, ghi vao sheet Exceptions, thong bao #finance-exceptions"
+    }
+  ]
+}

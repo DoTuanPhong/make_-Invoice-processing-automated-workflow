@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "InvoiceWebhookPayload",
+  "description": "Payload gui den Custom webhook cua scenario Invoice Processing Automation (hoac dung lam scenario input invoice_json khi goi qua MCP)",
+  "type": "object",
+  "required": ["invoice_number", "vendor_name", "total_amount", "currency"],
+  "properties": {
+    "invoice_number": {
+      "type": "string",
+      "description": "So hoa don, duy nhat. Dung de kiem tra trung.",
+      "minLength": 1
+    },
+    "vendor_name": {
+      "type": "string",
+      "description": "Ten nha cung cap."
+    },
+    "vendor_email": {
+      "type": "string",
+      "format": "email",
+      "description": "Email nha cung cap (tu chon)."
+    },
+    "invoice_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Ngay lap hoa don, dinh dang YYYY-MM-DD."
+    },
+    "due_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Han thanh toan, dinh dang YYYY-MM-DD."
+    },
+    "currency": {
+      "type": "string",
+      "pattern": "^[A-Z]{3}$",
+      "description": "Ma tien te ISO 4217, vd VND, USD, EUR."
+    },
+    "subtotal": {
+      "type": "number",
+      "description": "Tong truoc thue."
+    },
+    "tax_total": {
+      "type": "number",
+      "description": "Tong thue (VAT...)."
+    },
+    "total_amount": {
+      "type": "number",
+      "description": "Tong tien hoa don. Phai > 0."
+    },
+    "po_number": {
+      "type": "string",
+      "description": "So don hang (purchase order) lien ket, tu chon."
+    },
+    "line_items": {
+      "type": "array",
+      "description": "Chi tiet cac muc trong hoa don.",
+      "items": {
+        "type": "object",
+        "required": ["description", "amount"],
+        "properties": {
+          "description": { "type": "string" },
+          "quantity": { "type": "number" },
+          "unit_price": { "type": "number" },
+          "amount": { "type": "number" }
+        }
+      }
+    },
+    "file_url": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL file PDF/image hoa don de luu tru. Tu chon neu da co du lieu JSON day du."
+    },
+    "source": {
+      "type": "string",
+      "enum": ["email", "api", "drive", "manual"],
+      "description": "Nguon gui invoice."
+    }
+  },
+  "additionalProperties": false
+}
