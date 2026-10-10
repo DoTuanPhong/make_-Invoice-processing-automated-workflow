@@ -13,6 +13,10 @@ stateDiagram-v2
     AwaitingApproval --> Rejected: [approver rejects]
     Approved --> [*]
     Rejected --> [*]
+
+    Pending --> Error: [node fails] exception
+    AwaitingApproval --> Error: [node fails] exception
+    Error --> [*]
 ```
 
 ## Ký hiệu
@@ -33,6 +37,7 @@ stateDiagram-v2
 | AwaitingApproval | Hóa đơn giá trị cao (>1000), chờ approver duyệt |
 | Approved | Đã duyệt (tự động hoặc thủ công) |
 | Rejected | Bị từ chối |
+| Error | Bất kỳ node nào fail → execution lỗi, trigger Error Handler |
 
 ## Chuyển trạng thái (trigger → guard)
 
@@ -43,9 +48,12 @@ stateDiagram-v2
 | Pending → Approved | evaluated | `[totalAmount <= 1000]` | Auto-Approve |
 | AwaitingApproval → Approved | approver action | `[approver approves]` | Wait + Update Invoice Status |
 | AwaitingApproval → Rejected | approver action | `[approver rejects]` | Wait + Update Invoice Status |
+| Pending / AwaitingApproval → Error | node exception | `[any node fails]` | Error Handler Workflow (Error Trigger → Slack) |
 
 ## Lưu ý
 
 - Trạng thái được lưu trong cột **Status** của Google Sheets.
+- Trạng thái **Error** là trạng thái *execution*, không ghi ngược vào cột Status của sheet (row vẫn giữ giá trị cũ, ví dụ `Pending`). Error Handler chỉ notify Slack (workflow, failed node, error, execution URL).
+- Trigger Error chỉ chạy cho **production executions** (không chạy khi manual/test), link qua `settings.errorWorkflow` — đã verify.
 - `mathCheck = MISMATCH` không đổi trạng thái mà flag hóa đơn cần review (có thể mở rộng thành trạng thái `Review`).
 - UML state diagram còn hỗ trợ **entry/exit actions** (hành động khi vào/ra trạng thái) và **do activities** (hoạt động trong trạng thái) — có thể bổ sung nếu cần.
