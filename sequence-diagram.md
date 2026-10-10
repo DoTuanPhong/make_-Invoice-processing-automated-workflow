@@ -51,8 +51,8 @@ sequenceDiagram
         Note over W: execution resume — data nested trong body
         alt $json.body.status = Approved
             W->>GS: update → match columns.matchingColumns ["Invoice Number"] = Approved
-        else $json.body.status = Rejected
-            W->>GS: update → match Invoice Number = Rejected
+        else $json.body.status khác "Approved" (thường là Rejected)
+            W->>GS: update → ghi đúng giá trị body.status
         end
     else totalAmount <= 1000 (normal)
         W->>GS: auto-approve (match Invoice Number, status = Approved)

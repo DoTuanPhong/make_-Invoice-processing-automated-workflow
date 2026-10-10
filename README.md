@@ -32,7 +32,7 @@ Kết quả test: invoice cao (6050 > 1000) → gửi approval → POST `{invoic
 | Update Status không cập nhật row | sau Wait resume, data nested trong `body` ($json.body.invoiceNumber) | expression `$json.body.X \|\| $json.X` |
 
 1. **Invoice Webhook** — nhận hóa đơn qua POST
-2. **AI Extract Invoice** — Google Gemini 2.5 Flash (HTTP Request node, JSON mode)
+2. **AI Extract Invoice** — Google Gemini 3.5-flash-lite (HTTP Request node, JSON mode)
 3. **Validate & Format** — kiểm tra field bắt buộc + kiểm tra toán học (mathCheck)
 4. **Log Invoice** — Google Sheets (14 cột, status = Pending)
 5. **Notify Team** — Slack thông báo
@@ -60,6 +60,7 @@ Kết quả test: invoice cao (6050 > 1000) → gửi approval → POST `{invoic
 | `activity-diagram.md` | UML Activity Diagram (có swimlane) |
 | `sequence-diagram.md` | UML Sequence Diagram |
 | `state-diagram.md` | UML State Machine Diagram |
+| `SETUP.md` | Hướng dẫn setup từ đầu (bố cục, troubleshooting) |
 | `invoice-processing-workflow.json` | n8n workflow JSON (export từ n8n) |
 
 ## Webhook API
@@ -105,32 +106,27 @@ Vendor · Bill To · Invoice Number · Invoice Date · Due Date · PO Number · 
 | Google Sheets | OAuth2 (hoặc Service Account) | Log Invoice, Update Invoice Status, Auto-Approve |
 | Slack | OAuth2 (hoặc Access Token) | Notify Team, Request Approval |
 
-## Cấu hình cần điền
+## Cấu hình đã hoàn thành
 
-- **Google Sheets:** Spreadsheet ID + Sheet name (tên tab) — hiện đang để trống ở 3 node Google Sheets (`documentId`, `sheetName`)
-- **Slack:** channel (hiện để `#invoices`, mode=name)
+| Hạng | Giá trị |
+|---|---|
+| Credentials | 3/3 đã tạo (Gemini `httpQueryAuth`, Google Sheets `googleApi`, Slack `slackApi`) |
+| Google Sheets | Spreadsheet ID + Sheet name đã điền, 14 cột, đã share Editor cho service account |
+| Slack | channel `#all-n8nreceipt` (dùng `chat:write.public`, không cần invite bot) |
+| Workflow | **active** — webhook `POST /webhook/invoice-incoming` đang hoạt động |
+| Error Handler | workflow riêng, active, link `settings.errorWorkflow` |
 
-## Còn lại để chạy được (cần user cung cấp)
-
-1. Tạo 3 credentials ở trên trong n8n:
-   - **Google Gemini API** (HttpQueryAuth: Query Parameter Name = `key`, Value = API key từ aistudio.google.com — free tier)
-   - **Google Sheets** (Service Account JSON hoặc OAuth2)
-   - **Slack** (bot token `xoxb-...` hoặc OAuth2)
-2. Chọn credential "Google Gemini API" trong node AI Extract Invoice (hiện node chưa gắn credential)
-3. Điền Spreadsheet ID + Sheet name vào Log Invoice / Update Invoice Status / Auto-Approve
-4. Tạo sheet với 14 cột: Vendor · Bill To · Invoice Number · Invoice Date · Due Date · PO Number · Payment Terms · Currency · Subtotal · Tax Rate · Tax Amount · Total Amount · Math Check · Status
-5. Activate workflow (hiện `active: false`) → webhook `POST /webhook/invoice-incoming` mới hoạt động
-6. Test với sample invoice
+Để setup lại từ đầu trên môi trường khác → xem **[SETUP.md](SETUP.md)**.
 
 ## Đã sửa (lần này)
 
-- AI Extract Invoice: đổi từ OpenAI sang **Google Gemini 2.5 Flash** qua **HTTP Request node** (v4.5): `method: POST`, `url: .../models/gemini-2.5-flash:generateContent`, `authentication: genericCredentialType`, `genericAuthType: httpQueryAuth`, `jsonBody` gồm `systemInstruction` + `contents` + `generationConfig.responseMimeType: application/json`. API key truyền qua credential HttpQueryAuth (query param `key`) — free tier tại aistudio.google.com
+- AI Extract Invoice: đổi từ OpenAI sang **Google Gemini 3.5-flash-lite** qua **HTTP Request node** (v4.5): `method: POST`, `url: .../models/gemini-3.5-flash-lite:generateContent`, `authentication: genericCredentialType`, `genericAuthType: httpQueryAuth`, `jsonBody` gồm `systemInstruction` + `contents` + `generationConfig.responseMimeType: application/json`. API key truyền qua credential HttpQueryAuth (query param `key`) — free tier tại aistudio.google.com
 - Validate & Format: đọc `item.candidates[0].content.parts[0].text` (Gemini response), fallback OpenAI formats
 - Wait for Approval: `resume: webhook` (tham số đúng, cũ dùng `waitUntil` sai)
 - Slack nodes: `select: channel`, `channelId: {mode: name, value: #invoices}` (resourceLocator, cũ dùng `channel` sai)
 - Update Invoice Status / Auto-Approve: `columns.matchingColumns: ["Invoice Number"]` + giá trị match trong `columns.value` (bắt buộc với Google Sheets v4 update)
 - Request Approval: message có kèm `{{ $execution.resumeUrl }}` + hướng dẫn approver POST `{invoiceNumber, status}`
-- Error handling: tạo workflow **Invoice Error Handler** (Error Trigger → Slack #finance-errors, best practice dedicated error workflow) — cần Slack credential để activate + link `settings.errorWorkflow`
+- Error handling: workflow **Invoice Error Handler** (Error Trigger → Slack `#all-n8nreceipt`) đã active, link `settings.errorWorkflow` — đã verify trigger tự động
 
 ## Kiểm tra toán học (mathCheck)
 

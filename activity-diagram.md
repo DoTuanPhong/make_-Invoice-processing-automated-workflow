@@ -25,6 +25,7 @@
 
 > **Lưu ý quan trọng (UML 2.5):** guard nằm trên **edge** (mũi tên), không phải trên decision node. Decision node chỉ rẽ nhánh; mỗi edge ra có 1 guard `[condition]` được đánh giá tại runtime. Nếu cặp guard **exhaustive** thì viết phủ định đầy đủ (`[totalAmount <= 1000]`); nếu **không exhaustive** thì dùng guard đặc biệt `[else]` — UML 2.5.1 §12.3.22 cho phép **tối đa 1** outgoing edge của decision node dùng `[else]`, chỉ đúng khi token không được edge nào khác nhận.
 > **ActivityFinalNode (⊕) vs FlowFinalNode (✕):** ⊕ kết thúc toàn bộ activity (hủy mọi token đang chạy); ✕ chỉ kết thúc 1 nhánh riêng lẻ. Nhánh `Log Invoice` / `Notify Team` không đi tiếp nên dùng **✕**.
+> **Về Mermaid approximation:** Mermaid không có shape *thick bar*, nên Fork/Join được biểu thị bằng rectangle + ký hiệu ▬ trong label (để phân biệt với action — trong UML, ForkNode/JoinNode là control node, khác ActionNode); action dùng stadium `([...])`. Render phân cứng diagram là xấp xỉ của ký hiệu UML chuẩn — không thay thế được metadata/constraints mà UML quy định.
 
 ## Activity Diagram vs Flowchart (theo Tutorialspoint)
 
@@ -42,23 +43,26 @@ Activity diagram mô hình **business process** (dùng cho business users), khô
 
 Workflow dùng **fan-out** ở `Validate & Format` (implicit fork — 1 action sinh nhiều token ra 3 nhánh). Fork/Join chặt chẽ (thick bar) dùng khi cần **tổng hợp lại** (join) sau khi các nhánh song song xong; ở đây 2 nhánh kết thúc bằng **FlowFinalNode** nên không cần join:
 
+Tương đương với fan-out ở trên nếu dùng ForkNode chặt chẽ (cùng kết quả — chỉ khác về cách viết):
+
 ```mermaid
 flowchart TD
-    A["Log Invoice"] --> F["▬ Fork"]
-    F --> B["Notify Team · Slack"] --> FB(("✕"))
-    F --> C["Send Email"] --> FC(("✕"))
+    C(["Validate & Format"]) --> F["▬ Fork"]
+    F --> D(["Log Invoice"]) --> FFD(("✕"))
+    F --> E(["Notify Team"]) --> FFE(("✕"))
+    F --> G{"totalAmount > 1000 ?"}
 ```
 
 Ví dụ khi **có** join (các nhánh phải xong hết mới tiếp tục):
 
 ```mermaid
 flowchart TD
-    A2["Validate"] --> F2["▬ Fork"]
-    F2 --> B2["Log Invoice"]
-    F2 --> C2["Notify Team"]
+    A2(["Validate"]) --> F2["▬ Fork"]
+    F2 --> B2(["Log Invoice"])
+    F2 --> C2(["Notify Team"])
     B2 --> J2["▬ Join"]
     C2 --> J2
-    J2 --> D2["Tiếp tục"]
+    J2 --> D2(["Tiếp tục"])
 ```
 
 ## Exception handling (UML 2.5)
@@ -76,29 +80,29 @@ flowchart TD
 flowchart TD
     START((●)) --> A
     subgraph REGION["⬚ Interruptible activity region — xử lý chính"]
-        A["📥 Receive Invoice<br/>Webhook POST /invoice-incoming"]
-        A -->|"◉ body.invoiceText"| B["🤖 AI Extract Invoice<br/>Google Gemini 3.5-flash-lite<br/>HTTP POST :generateContent"]
-        B -->|"◉ candidates[0].content.parts[0].text<br/>→ JSON: 12 fields + lineItems (13 keys)"| C["✅ Validate & Format<br/>check required fields<br/>calcSubtotal = Σ lineItems<br/>calcTotal = subtotal + taxAmount<br/>mathCheck = OK / MISMATCH"]
+        A(["📥 Receive Invoice<br/>Webhook POST /invoice-incoming"])
+        A -->|"◉ body.invoiceText"| B(["🤖 AI Extract Invoice<br/>Google Gemini 3.5-flash-lite<br/>HTTP POST :generateContent"])
+        B -->|"◉ candidates[0].content.parts[0].text<br/>→ JSON: 12 fields + lineItems (13 keys)"| C(["✅ Validate & Format<br/>check required fields<br/>calcSubtotal = Σ lineItems<br/>calcTotal = subtotal + taxAmount<br/>mathCheck = OK / MISMATCH"])
 
-        C ==>|"[1] ◉ validated row"| D["📊 Log Invoice<br/>Google Sheets append<br/>Status = Pending"]
+        C ==>|"[1] ◉ validated row"| D(["📊 Log Invoice<br/>Google Sheets append<br/>Status = Pending"])
         D --> FFD(("✕"))
-        C ==>|"[2] ◉ validated row"| E["💬 Notify Team<br/>Slack"]
+        C ==>|"[2] ◉ validated row"| E(["💬 Notify Team<br/>Slack"])
         E --> FFE(("✕"))
         C ==>|"[3] ◉ validated row"| F{"💰 totalAmount > 1000?"}
 
-        F -->|"✔ [totalAmount > 1000]"| G["💬 Request Approval<br/>Slack + $execution.resumeUrl"]
-        G --> H["⏳ Wait for Approval<br/>webhook POST · pauses execution"]
+        F -->|"✔ [totalAmount > 1000]"| G(["💬 Request Approval<br/>Slack + $execution.resumeUrl"])
+        G --> H(["⏳ Wait for Approval<br/>webhook POST · pauses execution"])
         H --> M{"Approval result<br/>POST {invoiceNumber, status}"}
-        M -->|"◉ [status = Approved]"| I["📊 Update Invoice Status<br/>match on Invoice Number<br/>→ body.status"]
+        M -->|"◉ [status = Approved]"| I(["📊 Update Invoice Status<br/>match on Invoice Number<br/>→ body.status"])
         M -->|"◉ [else]"| I
 
-        F -->|"✘ [totalAmount <= 1000]"| J["📊 Auto-Approve<br/>match on Invoice Number → Approved"]
+        F -->|"✘ [totalAmount <= 1000]"| J(["📊 Auto-Approve<br/>match on Invoice Number → Approved"])
     end
 
     I --> K((⊕))
     J --> K
 
-    REGION -.->|"«interrupt» any node fails"| X["⚠️ Exception Handler<br/>= n8n Error Trigger workflow<br/>Error Trigger → Slack"]
+    REGION -.->|"«interrupt» any node fails"| X(["⚠️ Exception Handler<br/>= n8n Error Trigger workflow<br/>Error Trigger → Slack"])
     X --> K
 
     style START fill:#000,color:#000
@@ -117,7 +121,7 @@ flowchart TD
 - Edge label `[condition]` = guard (trên edge, evaluated at runtime). Quy ước: node `F` dùng cặp guard **exhaustive** (`>` và `<=`) nên viết phủ định đầy đủ; node `M` dùng `[status = Approved]` + `[else]` vì giá trị `status` không exhaustive (có thể là chuỗi bất kỳ) — `[else]` đảm bảo token luôn đi đến final node, khớp implementation (node Update nhận mọi giá trị status).
 - **Validate & Format fan-out (`==>`, implicit fork):** 1 action sinh nhiều token ra 3 nhánh. `Log Invoice` → **FlowFinalNode ✕**, `Notify Team` → **FlowFinalNode ✕** (cả 2 terminal, token vô hiệu, không chặn nhánh khác); `High Value?` tiếp tục điều hướng. n8n thực thi **tuần tự** đúng thứ tự [1] → [2] → [3].
 - **Lý do fan-out:** `Log Invoice` (Sheets append) và `Notify Team` (Slack) đều trả về **API response**, thay thế data chain. Nếu nối tiếp tuyến tính (Log → Notify → High Value?), node sau nhận undefined → rẽ sai nhánh + message thiếu dữ liệu.
-- **1 action `Update Invoice Status`, 2 incoming guarded edge:** implementation chỉ có 1 node n8n và **không có decision** sau Wait — node nhận mọi giá trị `$json.body.status`. Mô hình hóa outcome thành decision với `[status = Approved]` + `[else]` là trừu tưởng business process (Approved được ghi rõ, cần lưu ý mọi giá trị khác đều đi qua).
+- **1 action `Update Invoice Status`, 2 incoming guarded edge:** implementation chỉ có 1 node n8n và **không có decision** sau Wait — node nhận mọi giá trị `$json.body.status`. Mô hình hóa outcome thành decision với `[status = Approved]` + `[else]` là cách trừu tượng hóa business process (Approved được ghi rõ, cần lưu ý mọi giá trị khác đều đi qua).
 - **Interruptible activity region** (vùng viền đứt nét): bao quanh toàn bộ processing chính. Khi **bất kỳ node nào** trong vùng fail (AI Extract lỗi, Validate throw, Sheets/Slack lỗi...), mọi token trong vùng bị hủy và luồng chuyển sang Exception Handler — khớp với cách n8n Error Trigger hoạt động (bắt lỗi từ mọi node).
 - Edge đứt nét `«interrupt»` = interrupt flow (exception flow) từ region sang handler.
 - **Wait for Approval** (`resume: webhook`, `httpMethod: POST`): execution tạm dừng. Approver POST `{"invoiceNumber": "...", "status": "Approved"}` vào `$execution.resumeUrl`. Sau resume, node tiếp theo nhận dữ liệu **nested trong `body`** → expression dùng `$json.body.X || $json.X`.
@@ -140,26 +144,25 @@ Activity "Invoice Processing" có thể khai báo:
 flowchart TD
     START((●)) --> A
     subgraph SYS["🏢 System — n8n Workflow"]
-        A["📥 Receive Invoice"]
-        C ==> D["📊 Log Invoice<br/>Google Sheets append · Pending"]
+        A(["📥 Receive Invoice"])
+        C ==> D(["📊 Log Invoice<br/>Google Sheets append · Pending"])
         D --> FFD(("✕"))
-        C ==> E["💬 Notify Team<br/>Slack"]
+        C ==> E(["💬 Notify Team<br/>Slack"])
         E --> FFE(("✕"))
         C ==> F{"totalAmount > 1000?"}
-        F -->|"✔ [totalAmount > 1000]"| G["💬 Request Approval<br/>+ $execution.resumeUrl"]
-        G --> H["⏳ Wait for Approval<br/>POST resumeUrl"]
-        H --> MG{"«merge»"}
-        MG --> MD{"Approval result"}
-        MD -->|"◉ [status = Approved]"| I["📊 Update Invoice Status<br/>→ Approved"]
+        F -->|"✔ [totalAmount > 1000]"| G(["💬 Request Approval<br/>+ $execution.resumeUrl"])
+        G --> H(["⏳ Wait for Approval<br/>POST resumeUrl"])
+        MD{"Approval result"}
+        MD -->|"◉ [status = Approved]"| I(["📊 Update Invoice Status<br/>→ Approved"])
         MD -->|"◉ [else]"| I
-        F -->|"✘ [totalAmount <= 1000]"| J["📊 Auto-Approve → Approved"]
+        F -->|"✘ [totalAmount <= 1000]"| J(["📊 Auto-Approve → Approved"])
         I --> K((⊕))
         J --> K
-        C -.->|"«interrupt» any node fails"| X["⚠️ Exception Handler<br/>= Error Trigger workflow"]
+        C -.->|"«interrupt» any node fails"| X(["⚠️ Exception Handler<br/>= Error Trigger workflow"])
         X --> K
     end
     subgraph AI["🤖 AI Service — Google Gemini"]
-        B["gemini-3.5-flash-lite<br/>:generateContent"]
+        B(["gemini-3.5-flash-lite<br/>:generateContent"])
     end
     subgraph APP["👤 Approver"]
         AP{"Approve / Reject"}
@@ -167,10 +170,10 @@ flowchart TD
     A -->|"◉ body.invoiceText"| B
     B -->|"◉ parts[0].text → JSON"| C
     H --> AP
-    AP -->|"◉ POST {invoiceNumber, status}"| MG
+    AP -->|"◉ POST {invoiceNumber, status}"| MD
 ```
 
-> Swimlane trong UML là 2 đường song song + name box; Mermaid `subgraph` là xấp xỉ gần đúng. `AI Service (Google Gemini)` và `Approver` là **external participants** nên phải là partition riêng, không nằm trong swimlane System (n8n chỉ gọi qua HTTP API). Exception Handler nằm trong swimlane System (cùng trách nhiệm với workflow). Nhánh approval ở swimlane có 2 cạnh vào (từ `H` và `AP`), vi phạm constraint [1] của UML 2.5.1 §12.3.22 (*a decision node has one incoming edge*) — nên tách thành `«merge»` (MG) → decision `Approval result` (MD) để tuân thủ (diagram chính chỉ có 1 cạnh vào nên không cần merge). Lưu ý: swimlane này không vẽ interruptible activity region — edge «interrupt» vẽ từ node `C` làm điểm đại diện, nhưng nghĩa là **bất kỳ node nào trong SYS** fail đều trigger (xem diagram chính để biết vùng an toàn đầy đủ).
+> Swimlane trong UML là 2 đường song song + name box; Mermaid `subgraph` là xấp xỉ gần đúng. `AI Service (Google Gemini)` và `Approver` là **external participants** nên phải là partition riêng, không nằm trong swimlane System (n8n chỉ gọi qua HTTP API). Exception Handler nằm trong swimlane System (cùng trách nhiệm với workflow). Luồng approval đi **qua partition Approver**: `H --> AP --> decision`, nên decision chỉ có **1 cạnh vào** — tuân thủ constraint [1] của UML 2.5.1 §12.3.22 (*a decision node has one incoming edge*). (Lưu ý: không đường `H` vừa ra `AP` vừa ra decision — sẽ tạo implicit fork không mong muốn.) Ngoài ra, swimlane này không vẽ interruptible activity region — edge «interrupt» vẽ từ node `C` làm điểm đại diện, nhưng nghĩa là **bất kỳ node nào trong SYS** fail đều trigger (xem diagram chính để biết vùng an toàn đầy đủ).
 
 ## Data flow qua các node
 
@@ -184,7 +187,7 @@ flowchart TD
 | **High Value?** | validated row (fan-out [3]) | true / false branch |
 | Request Approval | validated row | Slack API response (message có `resumeUrl`) |
 | Wait for Approval | execution paused | dừng, chờ POST vào `$execution.resumeUrl` |
-| Update Invoice Status | **`body.invoiceNumber` + `body.status`** (nested sau resume) | Sheets row → Approved / Rejected (match `columns.matchingColumns = ["Invoice Number"]`) |
+| Update Invoice Status | **`body.invoiceNumber` + `body.status`** (nested sau resume) | Sheets row → **ghi đúng giá trị `body.status`** (thường là Approved/Rejected, nhưng mọi giá trị đều ghi được) — match `columns.matchingColumns = ["Invoice Number"]` |
 | Auto-Approve | validated row `$json.invoiceNumber` | Sheets row → Approved (match Invoice Number) |
 | **Exception Handler** *(workflow riêng: Invoice Error Handler)* | exception (bất kỳ node fail) | Slack `#all-n8nreceipt` (workflow name/ID, failed node, error message, execution URL) |
 
@@ -200,4 +203,6 @@ so sánh calcTotal vs totalAmount (31,703.70)
                           ↓
 |31,703.70 − 31,703.70| = 0 < 0.05  →  mathCheck = OK ✅
 (nếu AI đọc sai → MISMATCH → flag review thủ công)
+
+Xử lý thiếu `subtotal`: code dùng `base = isNaN(subtotal) ? calcSubtotal : subtotal` — nếu AI không trả subtotal thì lấy `calcSubtotal` (tổng line items). `taxRate` **không** được kiểm tra (chỉ dùng field `taxAmount`).
 ```
