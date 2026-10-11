@@ -82,7 +82,7 @@ flowchart TD
     subgraph REGION["⬚ Interruptible activity region — xử lý chính"]
         A(["📥 Receive Invoice<br/>Webhook POST /invoice-incoming"])
         A -->|"◉ body.invoiceText"| B(["🤖 AI Extract Invoice<br/>Google Gemini 3.5-flash-lite<br/>HTTP POST :generateContent"])
-        B -->|"◉ candidates[0].content.parts[0].text<br/>→ JSON: 12 fields + lineItems (13 keys)"| C(["✅ Validate & Format<br/>check required fields<br/>calcSubtotal = Σ lineItems<br/>calcTotal = subtotal + taxAmount<br/>mathCheck = OK / MISMATCH"])
+        B -->|"◉ JSON: 13 keys"| C(["✅ Validate & Format<br/>check required fields · mathCheck"])
 
         C ==>|"[1] ◉ validated row"| D(["📊 Log Invoice<br/>Google Sheets append<br/>Status = Pending"])
         D --> FFD(("✕"))
@@ -118,6 +118,8 @@ flowchart TD
 
 **Chú thích:**
 - Edge label `◉ data` = object flow (data token) — dữ liệu chạy giữa các action.
+- **AI Extract Invoice** gọi Gemini 3.5-flash-lite (`:generateContent`) và nhận JSON **13 keys** (12 fields + `lineItems`) tại path `candidates[0].content.parts[0].text`. Chi tiết các field xem phần *Data flow* bên dưới.
+- **Validate & Format** tính `calcSubtotal = Σ lineItems`, `calcTotal = subtotal + taxAmount`, `mathCheck = OK / MISMATCH` — công thức đầy đủ ở phần *Kiểm tra toán học*, không lặp lại trong node.
 - Edge label `[condition]` = guard (trên edge, evaluated at runtime). Quy ước: node `F` dùng cặp guard **exhaustive** (`>` và `<=`) nên viết phủ định đầy đủ; node `M` dùng `[status = Approved]` + `[else]` vì giá trị `status` không exhaustive (có thể là chuỗi bất kỳ) — `[else]` đảm bảo token luôn đi đến final node, khớp implementation (node Update nhận mọi giá trị status).
 - **Validate & Format fan-out (`==>`, implicit fork):** 1 action sinh nhiều token ra 3 nhánh. `Log Invoice` → **FlowFinalNode ✕**, `Notify Team` → **FlowFinalNode ✕** (cả 2 terminal, token vô hiệu, không chặn nhánh khác); `High Value?` tiếp tục điều hướng. n8n thực thi **tuần tự** đúng thứ tự [1] → [2] → [3].
 - **Lý do fan-out:** `Log Invoice` (Sheets append) và `Notify Team` (Slack) đều trả về **API response**, thay thế data chain. Nếu nối tiếp tuyến tính (Log → Notify → High Value?), node sau nhận undefined → rẽ sai nhánh + message thiếu dữ liệu.
@@ -173,7 +175,13 @@ flowchart TD
     AP -->|"◉ POST {invoiceNumber, status}"| MD
 ```
 
-> Swimlane trong UML là 2 đường song song + name box; Mermaid `subgraph` là xấp xỉ gần đúng. `AI Service (Google Gemini)` và `Approver` là **external participants** nên phải là partition riêng, không nằm trong swimlane System (n8n chỉ gọi qua HTTP API). Exception Handler nằm trong swimlane System (cùng trách nhiệm với workflow). Luồng approval đi **qua partition Approver**: `H --> AP --> decision`, nên decision chỉ có **1 cạnh vào** — tuân thủ constraint [1] của UML 2.5.1 §12.3.22 (*a decision node has one incoming edge*). (Lưu ý: không đường `H` vừa ra `AP` vừa ra decision — sẽ tạo implicit fork không mong muốn.) Ngoài ra, swimlane này không vẽ interruptible activity region — edge «interrupt» vẽ từ node `C` làm điểm đại diện, nhưng nghĩa là **bất kỳ node nào trong SYS** fail đều trigger (xem diagram chính để biết vùng an toàn đầy đủ).
+> **Về swimlane diagram**
+>
+> - Swimlane UML = 2 đường song song + name box; Mermaid `subgraph` chỉ là xấp xỉ.
+> - `AI Service (Google Gemini)` và `Approver` là **external participants** nên ở partition riêng, không nằm trong swimlane System (n8n chỉ gọi qua HTTP API).
+> - `Exception Handler` nằm trong swimlane System (cùng trách nhiệm với workflow).
+> - Luồng approval đi **qua partition Approver**: `H --> AP --> decision`, nên decision chỉ có **1 cạnh vào** — tuân thủ constraint [1] của UML 2.5.1 §12.3.22 (*a decision node has one incoming edge*). Không được vẽ `H` vừa ra `AP` vừa ra decision — sẽ tạo implicit fork.
+> - Swimlane này không vẽ interruptible activity region; edge «interrupt» từ node `C` chỉ là điểm đại diện cho **bất kỳ node nào trong SYS** fail (vùng đầy đủ xem diagram chính).
 
 ## Data flow qua các node
 
