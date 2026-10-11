@@ -1,3 +1,8 @@
+> **⚠️ ĐÃ BỎ — KHÔNG DÙNG LÀM THAM CHIẾU CHO HỆ THỐNG HIỆN TẠI.**
+> Các file trong `workflow/` mô tả thiết kế **gốc trên Make.com** (OpenAI, 2-scenario,
+> webhook workflow-level). Hệ thống thực tế đã pivot sang **n8n** và khác biệt nhiều điểm.
+> Tài liệu có hiệu lực: **[SETUP.md](../SETUP.md)** và **[README.md](../README.md)**.
+> Giữ lại đây chỉ để lưu lịch sử quyết định thiết kế.
 # Cài đặt Make MCP Server
 
 Make MCP server là server đám mây do Make host (không cần cài local), cho phép AI assistant (Cursor, Claude, ChatGPT...) **chạy scenario** và **quản lý account Make** (tạo/sửa scenario, webhook, data store...) qua giao thức MCP.

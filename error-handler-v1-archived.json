@@ -1,0 +1,97 @@
+{
+  "id": "QhFlC3iKhUbPOf8R",
+  "name": "Invoice Error Handler",
+  "description": "Dedicated error handler (best practice). Error Trigger -> Slack #finance-errors. Linked via settings.errorWorkflow from Invoice Processing Automated and other workflows.",
+  "active": false,
+  "activeVersionId": null,
+  "createdAt": "2026-10-08T12:02:12.969Z",
+  "updatedAt": "2026-10-11T02:21:57.000Z",
+  "isArchived": true,
+  "versionId": "0f847845-14c7-4298-a9de-6b35b1dfabd8",
+  "versionCounter": 3,
+  "sourceWorkflowId": null,
+  "triggerCount": 0,
+  "nodes": [
+    {
+      "id": "e0000000-0000-0000-0000-000000000001",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        240,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "e0000000-0000-0000-0000-000000000002",
+      "name": "Notify Finance Errors",
+      "webhookId": "2378b2e5-ec6e-4b61-ab57-a84d820229fe",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "position": [
+        560,
+        300
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "mode": "name",
+          "value": "#all-n8nreceipt"
+        },
+        "text": "={{ '🚨 *Workflow Error*\\nWorkflow: ' + $json.workflow.name + ' (ID: ' + $json.workflow.id + ')\\nFailed node: ' + ($json.execution.lastNodeExecuted || 'trigger') + '\\nMode: ' + $json.execution.mode + '\\nError: ' + $json.execution.error.message + '\\nExecution: ' + $json.execution.url }}",
+        "options": {}
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "bAVJK6Js9dbqrFE5",
+          "name": "Slack API - Invoice Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Notify Finance Errors",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {
+    "callerPolicy": "any"
+  },
+  "staticData": null,
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "QhFlC3iKhUbPOf8R",
+      "projectId": "VlA4PmOXFcPQPK9P",
+      "project": {
+        "id": "VlA4PmOXFcPQPK9P",
+        "name": "Tuan Phong Do <phong02468@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "aae16d89-cbc7-4de0-911c-34d2e3c5c832",
+        "createdAt": "2026-10-07T23:11:45.234Z",
+        "updatedAt": "2026-10-07T23:19:22.347Z"
+      },
+      "createdAt": "2026-10-08T12:02:12.969Z",
+      "updatedAt": "2026-10-08T12:02:12.969Z"
+    }
+  ],
+  "activeVersion": null
+}

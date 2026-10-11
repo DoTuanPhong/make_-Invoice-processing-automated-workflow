@@ -29,7 +29,7 @@ sequenceDiagram
 
     rect rgb(240, 240, 240)
     Note over W,V: Validate fan-out — n8n chạy tuần tự [1] → [2] → [3]
-    W->>GS: [1] append row (status = Pending)
+    W->>GS: [1] upsert row theo Dedup Key (status = Pending / Needs Review)
     activate GS
     GS-->>W: Sheets API response
     deactivate GS
@@ -37,24 +37,24 @@ sequenceDiagram
     activate SL
     SL-->>W: Slack API response
     deactivate SL
-    W->>W: [3] router: totalAmount > 1000 ?
+    W->>W: [3] router: totalAmount > 1000 OR mathCheck != OK ?
     end
 
-    alt totalAmount > 1000 (high value)
+        alt totalAmount > 1000 OR mathCheck != OK (needs review)
         W->>SL: request approval (includes $execution.resumeUrl)
         activate SL
         SL->>AP: approval request + resume URL
         activate AP
-        AP->>W: POST resumeUrl {invoiceNumber, status} (httpMethod: POST)
+        AP->>W: POST resumeUrl {dedupKey, status, approvedBy} (httpMethod: POST, max 7 days)
         deactivate AP
         deactivate SL
         Note over W: execution resume — data nested trong body
         alt $json.body.status = Approved
-            W->>GS: update → match columns.matchingColumns ["Invoice Number"] = Approved
+            W->>GS: update → match columns.matchingColumns ["Dedup Key"] = Approved
         else $json.body.status khác "Approved" (thường là Rejected)
-            W->>GS: update → ghi đúng giá trị body.status
+            W->>GS: update → ghi đúng giá trị body.status (match Dedup Key)
         end
-    else totalAmount <= 1000 (normal)
+        else totalAmount <= 1000 AND mathCheck = OK (clean)
         W->>GS: auto-approve (match Invoice Number, status = Approved)
     end
     deactivate W
@@ -82,9 +82,10 @@ sequenceDiagram
 
 ## Ghi chú
 
+- **Router OR:** `totalAmount > 1000` **hoặc** `mathCheck != OK` → chờ duyệt. Tự động duyệt chỉ khi cả hai điều kiện đều không được thoả — hóa đơn lệch số học không bao giờ tự động duyệt.
 - **Validate fan-out:** `Validate & Format` sinh nhiều token ra 3 nhánh ([1] Sheets append, [2] Slack notify, [3] router). Nguyên nhân: node Sheets/Slack trả về **API response** thay thế data chain — nếu nối tiếp tuyến tính, node sau nhận `undefined` → rẽ sai nhánh + message thiếu dữ liệu. n8n thực thi tuần tự theo thứ tự khai báo.
 - **Data nesting (webhook):** n8n Webhook node output lồng payload trong `body` → expression dùng `$json.body.invoiceText || $json.invoiceText`.
-- **Wait for Approval** (`resume: webhook`, `httpMethod: POST`): execution tạm dừng, `$execution.resumeUrl` sinh tại runtime. Approver POST `{"invoiceNumber": "...", "status": "Approved"}`. Nếu không set `httpMethod: POST` → mặc định GET → resume bị 404 "no waiting webhook with a matching path/method".
+- **Wait for Approval** (`resume: webhook`, `httpMethod: POST`, `limitWaitTime: 7 ngày`): execution tạm dừng; quá 7 ngày không có quyết định thì execution kết thúc (không ghi sổ). Approver POST `{"invoiceNumber": "...", "status": "Approved"}`. Nếu không set `httpMethod: POST` → mặc định GET → resume bị 404 "no waiting webhook with a matching path/method".
 - **Sau resume**, dữ liệu đầu vào node tiếp theo cũng nested trong `body` → `Update Invoice Status` dùng `$json.body.invoiceNumber || $json.invoiceNumber`, và `columns.matchingColumns: ["Invoice Number"]` để tìm row.
 - **Exception path** (đã implement): `settings.errorWorkflow` → workflow `Invoice Error Handler` (Error Trigger → Slack). Chỉ chạy cho **production executions**; trigger khi bất kỳ node nào fail. Đã verify.
 - `mathCheck = MISMATCH` khi `|calcTotal − totalAmount| ≥ 0.05` → không rẽ nhánh, vẫn ghi Sheets kèm flag (cần review thủ công).

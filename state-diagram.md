@@ -8,7 +8,8 @@ Mô tả trạng thái của một hóa đơn qua vòng đời xử lý.
 stateDiagram-v2
     [*] --> Pending: invoice received (webhook)
     Pending --> AwaitingApproval: [totalAmount > 1000] high value
-    Pending --> Approved: [totalAmount <= 1000] auto-approve
+    Pending --> AwaitingApproval: [mathCheck != OK] so hoc lech
+    Pending --> Approved: [totalAmount <= 1000 AND mathCheck = OK] auto-approve
     AwaitingApproval --> Approved: [approver approves]
     AwaitingApproval --> Rejected: [approver rejects]
     Approved --> [*]
@@ -37,6 +38,7 @@ stateDiagram-v2
 | AwaitingApproval | Hóa đơn giá trị cao (>1000), chờ approver duyệt |
 | Approved | Đã duyệt (tự động hoặc thủ công) |
 | Rejected | Bị từ chối |
+| Needs Review | `mathCheck = MISMATCH` — lệch số học, ghi sổ nhưng không tự động duyệt |
 | Error | Bất kỳ node nào fail → execution lỗi, trigger Error Handler |
 
 ## Chuyển trạng thái (trigger → guard)
@@ -44,8 +46,8 @@ stateDiagram-v2
 | Từ → Đến | Trigger | Guard | Node thực hiện |
 |---|---|---|---|
 | → Pending | invoice received | — | Invoice Webhook + Log Invoice |
-| Pending → AwaitingApproval | evaluated | `[totalAmount > 1000]` | High Value? (IF) |
-| Pending → Approved | evaluated | `[totalAmount <= 1000]` | Auto-Approve |
+| Pending → AwaitingApproval | evaluated | `[totalAmount > 1000]` HOẶC `[mathCheck != OK]` | Needs review? (IF, OR) |
+| Pending → Approved | evaluated | `[totalAmount <= 1000]` **vÀ** `[mathCheck = OK]` | Auto-Approve |
 | AwaitingApproval → Approved | approver action | `[approver approves]` | Wait + Update Invoice Status |
 | AwaitingApproval → Rejected | approver action | `[approver rejects]` | Wait + Update Invoice Status |
 | Pending / AwaitingApproval → Error | node exception | `[any node fails]` | Error Handler Workflow (Error Trigger → Slack) |

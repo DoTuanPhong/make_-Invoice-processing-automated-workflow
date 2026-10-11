@@ -2,7 +2,7 @@
 
 **Workflow ID:** `InfDUsLVIxCSqqlg`
 **n8n:** http://127.0.0.1:5678
-**Webhook:** `POST http://127.0.0.1:5678/webhook/invoice-incoming`
+**Webhook:** `POST http://127.0.0.1:5678/webhook/invoice-incoming` (**bat buoc** header `x-invoice-key: <key>`)
 
 ## Tổng quan
 
@@ -14,7 +14,7 @@ Workflow `Invoice Processing Automated` đã **chạy thành công toàn bộ lu
 
 ```
 Webhook → AI Extract (Gemini) → Validate → Sheets append → Slack notify
-       → High Value? → true: Request Approval → Wait → POST approval → Update Status (Approved/Rejected)
+       → Needs review? → true: Request Approval → Wait → POST approval → Update Status (Approved/Rejected)
                     → false: Auto-Approve
 ```
 
@@ -36,20 +36,27 @@ Kết quả test: invoice cao (6050 > 1000) → gửi approval → POST `{invoic
 3. **Validate & Format** — kiểm tra field bắt buộc + kiểm tra toán học (mathCheck)
 4. **Log Invoice** — Google Sheets (14 cột, status = Pending)
 5. **Notify Team** — Slack thông báo
-6. **High Value?** — totalAmount > 1000?
+6. **Needs review?** — `totalAmount > 1000` **HOặC** `mathCheck != OK`?
+   → Hóa đơn lệch số học (`MISMATCH`) KHÔNG tự động duyệt — ghi sổ với `Status = Needs Review` và luôn đi nhánh chờ người duyệt.
    - **true** → Request Approval (Slack, includes `{{ $execution.resumeUrl }}`) → Wait for Approval (webhook) → Update Invoice Status
    - **false** → Auto-Approve (Google Sheets → Approved)
 
-## Approval flow (high value)
+## Approval flow (hóa đơn cao giá trị HOẶC lệch số học)
 
 1. **Request Approval** posts to Slack with the runtime resume URL (`{{ $execution.resumeUrl }}`) and the invoice number.
 2. **Wait for Approval** pauses the execution (webhook URL generated at runtime).
-3. Approver POSTs JSON to the resume URL:
+3. Approver POSTs JSON to the resume URL (can co **`dedupKey`** — n8n match row bang key nay):
    ```json
-   { "invoiceNumber": "INV-123", "status": "Approved" }
+   {
+     "dedupKey": "GLOBAL TECH SERVICES LTD|INV-123",
+     "status": "Approved",
+     "approvedBy": "ten hoac email",
+     "comment": "ly do (tuy chon)"
+   }
    ```
-   (or `"status": "Rejected"`)
-4. **Update Invoice Status** finds the Google Sheets row by **Invoice Number** (`columns.matchingColumns`) and sets **Status** to `Approved` / `Rejected`.
+4. **Update Invoice Status** tim row bang **Dedup Key** (`columns.matchingColumns`) va set **Status** thanh `Approved` / `Rejected`.
+
+   > `dedupKey` duoc In ra trong message Slack cua buoc Request Approval — approver chi can copy lai.
 
 > Alternative (n8n-native): replace Request Approval + Wait with a single Slack node using operation **Send and Wait for Response** (`sendAndWait`) — approver clicks a button in Slack and the response flows through automatically. Requires Slack OAuth2 with interactivity configured.
 
@@ -60,16 +67,21 @@ Kết quả test: invoice cao (6050 > 1000) → gửi approval → POST `{invoic
 | `activity-diagram.md` | UML Activity Diagram (có swimlane) |
 | `sequence-diagram.md` | UML Sequence Diagram |
 | `state-diagram.md` | UML State Machine Diagram |
-| `SETUP.md` | Hướng dẫn setup từ đầu (bố cục, troubleshooting) |
-| `invoice-processing-workflow.json` | n8n workflow JSON (export từ n8n) |
+| `BUSINESS-SPEC.md` | **Đặc tả nghiệp vụ đầy đủ** (16 phần, đánh dấu đã có / dự kiến) |
+| `SETUP.md` | Hướng dẫn setup từ đầy đầy (bố cục, troubleshooting) |
+| `invoice-processing-workflow.json` | n8n workflow JSON (export/import) |
+| `error-handler-workflow.json` | Error handler v2 — JSON để import |
+| `error-handler-v1-archived.json` | Bản lưu error handler v1 (chỉ post Slack) để hoàn tác |
 
 ## Webhook API
 
 **Request:**
 
-```json
-POST /webhook/invoice-incoming
-{ "invoiceText": "<nội dung hóa đơn>", "fileName": "invoice.pdf" }
+```bash
+curl -X POST http://127.0.0.1:5678/webhook/invoice-incoming \
+  -H "Content-Type: application/json" \
+  -H "x-invoice-key: <key lay trong n8n > Credentials > Invoice Webhook Key>" \
+  -d '{"invoiceText":"<nội dung hóa đơn>","fileName":"invoice.pdf"}'
 ```
 
 **AI Extract output:**
@@ -94,9 +106,11 @@ POST /webhook/invoice-incoming
 }
 ```
 
-## Google Sheets columns (14)
+## Google Sheets: 2 tab
 
-Vendor · Bill To · Invoice Number · Invoice Date · Due Date · PO Number · Payment Terms · Currency · Subtotal · Tax Rate · Tax Amount · Total Amount · Math Check · Status
+**`Sheet1`** (15 cột): Vendor · Bill To · Invoice Number · Invoice Date · Due Date · PO Number · Payment Terms · Currency · Subtotal · Tax Rate · Tax Amount · Total Amount · Math Check · Status · Dedup Key
+
+**`Exceptions`** (13 cột): Exception ID · Timestamp · Execution ID · Failed Node · Category · Severity · Error Message · Execution URL · Retry Of · Mode · Status · Resolution · Notes
 
 ## Credentials cần tạo (n8n → Settings → Credentials)
 
@@ -110,11 +124,14 @@ Vendor · Bill To · Invoice Number · Invoice Date · Due Date · PO Number · 
 
 | Hạng | Giá trị |
 |---|---|
-| Credentials | 3/3 đã tạo (Gemini `httpQueryAuth`, Google Sheets `googleApi`, Slack `slackApi`) |
+| Credentials | 4/4 đã tạo (Gemini `httpQueryAuth`, Google Sheets `googleApi`, Slack `slackApi`, Webhook `httpHeaderAuth`) |
 | Google Sheets | Spreadsheet ID + Sheet name đã điền, 14 cột, đã share Editor cho service account |
 | Slack | channel `#all-n8nreceipt` (dùng `chat:write.public`, không cần invite bot) |
+| Webhook auth | header `x-invoice-key` (credential **Invoice Webhook Key**) — không có header sẽ trả 403 |
+| `Log Invoice` | `appendOrUpdate` (upsert) theo **Dedup Key** — gửi lại cùng hóa đơn không tạo dòng trùng |
+| `Wait for Approval` | chối tối đa **7 ngày** (`limitWaitTime`) |
 | Workflow | **active** — webhook `POST /webhook/invoice-incoming` đang hoạt động |
-| Error Handler | workflow riêng, active, link `settings.errorWorkflow` |
+| Error Handler | **Invoice Error Handler v2** (active, link `settings.errorWorkflow`): phân loại lỗi → ghi DLQ tab `Exceptions` → Slack |
 
 Để setup lại từ đầu trên môi trường khác → xem **[SETUP.md](SETUP.md)**.
 
@@ -126,7 +143,7 @@ Vendor · Bill To · Invoice Number · Invoice Date · Due Date · PO Number · 
 - Slack nodes: `select: channel`, `channelId: {mode: name, value: #invoices}` (resourceLocator, cũ dùng `channel` sai)
 - Update Invoice Status / Auto-Approve: `columns.matchingColumns: ["Invoice Number"]` + giá trị match trong `columns.value` (bắt buộc với Google Sheets v4 update)
 - Request Approval: message có kèm `{{ $execution.resumeUrl }}` + hướng dẫn approver POST `{invoiceNumber, status}`
-- Error handling: workflow **Invoice Error Handler** (Error Trigger → Slack `#all-n8nreceipt`) đã active, link `settings.errorWorkflow` — đã verify trigger tự động
+- Error handling: **Invoice Error Handler v2** (Error Trigger → Code phân loại → Sheets append DLQ → Slack). Phân loại 16 loại lỗi thành 5 nhóm: `data/validation`, `infra/permission`, `Google API`, `Slack/integration`, `transient (API)`, `unknown` — kèm severity + route (IT vs AP Clerk). Đã verify end-to-end: lỗi cố ý → exec error → DLQ ghi dòng → Slack nhận đúng (`:warning:`, route AP Clerk)
 
 ## Kiểm tra toán học (mathCheck)
 
@@ -137,3 +154,20 @@ mathCheck    = OK nếu |calcTotal − totalAmount| < 0.05, ngược lại MISMA
 ```
 
 → MISMATCH flag hóa đơn cần review thủ công (tránh ghi sai dữ liệu khi AI đọc sai).
+
+## Quy tắc validate (hardening 2026-10-11)
+
+Node `Validate & Format` **từ chối** (throwing → error workflow) khi:
+
+| Điều kiện | Ví dụ bị chặn |
+|---|---|
+| Thiếu field bắt buộc | `vendor` / `billTo` / `invoiceNumber` rỗng |
+| Field là object/array thay vì text | `vendor: ["ACME"]` |
+| `totalAmount` không parse được thành số | `"N/A"`, `{value:500}` |
+| `totalAmount <= 0` | `0`, `(500.00)` (= -500) |
+| `currency` không phải ISO 3 chữ | `840`, `"us dollar"` |
+| `lineItems` có nhưng không phải array | `"nope"` |
+
+Parse số an toàn: `"12,500.00"` → 12500, `"12.500,00"` → 12500, `"USD 1250.00"` → 1250, `"(500)"` → -500.
+
+> ⚠️ **Giạn hạn:** với dạng 3 chữ số sau dấu phây (`500.000`) code chọn cách đọc theo chuẩn châu Âu (500.000). Nếu vendor dùng dạng US với 3 chữ số thập phân, số sẽ bị đọc lại — hãy đối chiếu bằng `mathCheck` khi xử lý hóa đơn từ vendor như vậy.

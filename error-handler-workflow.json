@@ -1,0 +1,357 @@
+{
+  "id": "U84rJVpHTLNOA68Q",
+  "name": "Invoice Error Handler v2",
+  "description": "Error handler nang cao: Error Trigger -> phan loai loi (Code) -> ghi DLQ (tab Exceptions) -> Slack notify. Thay the 'Invoice Error Handler' (chi post Slack).",
+  "active": true,
+  "activeVersionId": "2f9d084b-deee-452e-9297-ed12e377cb82",
+  "createdAt": "2026-10-11T02:06:17.132Z",
+  "updatedAt": "2026-10-11T02:16:36.804Z",
+  "isArchived": false,
+  "versionId": "2f9d084b-deee-452e-9297-ed12e377cb82",
+  "versionCounter": 3,
+  "sourceWorkflowId": null,
+  "triggerCount": 0,
+  "nodes": [
+    {
+      "id": "e2000000-0000-0000-0000-000000000001",
+      "name": "Error Trigger",
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        220,
+        300
+      ],
+      "parameters": {}
+    },
+    {
+      "id": "e2000000-0000-0000-0000-000000000002",
+      "name": "Classify & Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        460,
+        300
+      ],
+      "parameters": {
+        "mode": "runOnceForAllItems",
+        "jsCode": "// ---- phân loại lỗi + format (thay cho 6 node IF) ----\nconst t0 = $input.first().json;\nconst ex = t0.execution || {};\nconst wf = t0.workflow || {};\nconst err = ex.error || {};\n\nconst msg = String(err.message || \"(khong co message)\");\nconst stack = String(err.stack || \"\");\nconst desc = String(err.description || \"\");\n\nfunction classify(text) {\n  const s = (msg + \" \" + desc + \" \" + stack).toLowerCase();\n  // 1) hạ tầng / cấu hình → cần IT, mức nghiêm trọng\n  if (/insufficient|missing required credential|private key|unauthori[sz]ed|forbidden|permission denied/.test(s))\n    return { category: \"infra/permission\", severity: \"critical\", route: \"IT\" };\n  if (/channel_not_found|not_in_channel|invalid_auth|invalid_charset/.test(s))\n    return { category: \"Slack/integration\", severity: \"critical\", route: \"IT\" };\n  if (/google sheets api has not been used|api has not been used|quota|rate limit|resource has been exhausted/.test(s))\n    return { category: \"Google API\", severity: \"critical\", route: \"IT\" };\n  // 2) lỗi dữ liệu do AI/người dùng → cần AP Clerk\n  if (/missing required field|invalid (vendor|billto|invoicenumber|totalamount|currency|lineitems)|ai output is not/.test(s))\n    return { category: \"data/validation\", severity: \"warning\", route: \"AP Clerk\" };\n  // 3) tạm thời — đã hết retry (retryOnFail ×3) nên vẫn cần xử lý\n  if (/429|503|502|timeout|etimedout|econnreset|fetch failed|experiencing high demand/.test(s))\n    return { category: \"transient (API)\", severity: \"warning\", route: \"AP Clerk\" };\n  // 4) không rõ → coi như nghiêm trọng\n  return { category: \"unknown\", severity: \"critical\", route: \"IT\" };\n}\n\nconst cls = classify();\nconst node = ex.lastNodeExecuted || \"(unknown node)\";\nconst exId = ex.id || \"\";\nconst ts = new Date().toISOString();\nconst excId = \"EXC-\" + ts.replace(/[-:T.Z]/g, \"\").slice(0, 14) + \"-\" + String(exId).slice(-4);\n\nconst execUrl = ex.url\n  || (\"http://127.0.0.1:5678/workflow/\" + String(wf.id || \"\") + \"/executions/\" + String(exId));\n\nconst severityIcon = { critical: \":rotating_light:\", warning: \":warning:\", info: \":information_source:\" };\n\nreturn [{\n  json: {\n    exceptionId: excId,\n    timestamp: ts,\n    executionId: exId,\n    failedNode: node,\n    category: cls.category,\n    severity: cls.severity,\n    route: cls.route,\n    errorMessage: msg,\n    errorName: err.name || \"\",\n    errorStack: stack.slice(0, 2000),\n    executionUrl: execUrl,\n    retryOf: ex.retryOf || \"\",\n    mode: ex.mode || \"\",\n    workflowName: wf.name || \"\",\n    workflowId: wf.id || \"\",\n    status: \"Open\",\n    resolution: \"\",\n    notes: \"\",\n    slackText:\n      severityIcon[cls.severity] + \" *Workflow Error — \" + cls.severity.toUpperCase() + \"*\\n\"\n      + \"Exception: `\" + excId + \"` (route: \" + cls.route + \")\\n\"\n      + \"Workflow: \" + (wf.name || \"?\") + \" (\" + (wf.id || \"?\") + \")\\n\"\n      + \"Failed node: `\" + node + \"`\\n\"\n      + \"Category: \" + cls.category + \"\\n\"\n      + \"Error: \" + msg.slice(0, 400) + \"\\n\"\n      + \"Mode: \" + (ex.mode || \"?\") + (ex.retryOf ? \" (retry of \" + ex.retryOf + \")\" : \"\") + \"\\n\"\n      + \"Execution: \" + execUrl + \"\\n\"\n      + \"_DLQ: hang da ghi vao tab Exceptions_\",\n  },\n}];"
+      }
+    },
+    {
+      "id": "e2000000-0000-0000-0000-000000000003",
+      "name": "Write DLQ Record",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        700,
+        300
+      ],
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "authentication": "serviceAccount",
+        "documentId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "14c2eWIy0D1I_iwI5G_L7RuOHsilyue85sfRUsm9Qmsk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "Exceptions"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Exception ID": "={{ $json.exceptionId }}",
+            "Timestamp": "={{ $json.timestamp }}",
+            "Execution ID": "={{ $json.executionId }}",
+            "Failed Node": "={{ $json.failedNode }}",
+            "Category": "={{ $json.category }}",
+            "Severity": "={{ $json.severity }}",
+            "Error Message": "={{ $json.errorMessage }}",
+            "Execution URL": "={{ $json.executionUrl }}",
+            "Retry Of": "={{ $json.retryOf }}",
+            "Mode": "={{ $json.mode }}",
+            "Status": "={{ $json.status }}",
+            "Resolution": "={{ $json.resolution }}",
+            "Notes": "={{ $json.notes }}"
+          },
+          "matchingColumns": [
+            "Exception ID"
+          ]
+        },
+        "options": {}
+      },
+      "credentials": {
+        "googleApi": {
+          "id": "zPP2IPZNZfgpsMjp",
+          "name": "Google Sheets Service Account"
+        }
+      }
+    },
+    {
+      "id": "e2000000-0000-0000-0000-000000000004",
+      "name": "Notify Team",
+      "webhookId": "736ea4a2-d81e-4829-8e57-2319494ecb0b",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2,
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 2000,
+      "position": [
+        940,
+        300
+      ],
+      "parameters": {
+        "resource": "message",
+        "operation": "post",
+        "select": "channel",
+        "channelId": {
+          "mode": "name",
+          "value": "#all-n8nreceipt"
+        },
+        "text": "={{ $('Classify & Format').item.json.slackText }}",
+        "options": {}
+      },
+      "credentials": {
+        "slackApi": {
+          "id": "bAVJK6Js9dbqrFE5",
+          "name": "Slack API - Invoice Bot"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Error Trigger": {
+      "main": [
+        [
+          {
+            "node": "Classify & Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify & Format": {
+      "main": [
+        [
+          {
+            "node": "Write DLQ Record",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Write DLQ Record": {
+      "main": [
+        [
+          {
+            "node": "Notify Team",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "nodeGroups": [],
+  "settings": {},
+  "staticData": null,
+  "pinData": null,
+  "meta": null,
+  "tags": [],
+  "shared": [
+    {
+      "role": "workflow:owner",
+      "workflowId": "U84rJVpHTLNOA68Q",
+      "projectId": "VlA4PmOXFcPQPK9P",
+      "project": {
+        "id": "VlA4PmOXFcPQPK9P",
+        "name": "Tuan Phong Do <phong02468@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "customTelemetryTags": [],
+        "creatorId": "aae16d89-cbc7-4de0-911c-34d2e3c5c832",
+        "createdAt": "2026-10-07T23:11:45.234Z",
+        "updatedAt": "2026-10-07T23:19:22.347Z"
+      },
+      "createdAt": "2026-10-11T02:06:17.136Z",
+      "updatedAt": "2026-10-11T02:06:17.136Z"
+    }
+  ],
+  "activeVersion": {
+    "versionId": "2f9d084b-deee-452e-9297-ed12e377cb82",
+    "workflowId": "U84rJVpHTLNOA68Q",
+    "nodes": [
+      {
+        "id": "e2000000-0000-0000-0000-000000000001",
+        "name": "Error Trigger",
+        "type": "n8n-nodes-base.errorTrigger",
+        "typeVersion": 1,
+        "position": [
+          220,
+          300
+        ],
+        "parameters": {}
+      },
+      {
+        "id": "e2000000-0000-0000-0000-000000000002",
+        "name": "Classify & Format",
+        "type": "n8n-nodes-base.code",
+        "typeVersion": 2,
+        "position": [
+          460,
+          300
+        ],
+        "parameters": {
+          "mode": "runOnceForAllItems",
+          "jsCode": "// ---- phân loại lỗi + format (thay cho 6 node IF) ----\nconst t0 = $input.first().json;\nconst ex = t0.execution || {};\nconst wf = t0.workflow || {};\nconst err = ex.error || {};\n\nconst msg = String(err.message || \"(khong co message)\");\nconst stack = String(err.stack || \"\");\nconst desc = String(err.description || \"\");\n\nfunction classify(text) {\n  const s = (msg + \" \" + desc + \" \" + stack).toLowerCase();\n  // 1) hạ tầng / cấu hình → cần IT, mức nghiêm trọng\n  if (/insufficient|missing required credential|private key|unauthori[sz]ed|forbidden|permission denied/.test(s))\n    return { category: \"infra/permission\", severity: \"critical\", route: \"IT\" };\n  if (/channel_not_found|not_in_channel|invalid_auth|invalid_charset/.test(s))\n    return { category: \"Slack/integration\", severity: \"critical\", route: \"IT\" };\n  if (/google sheets api has not been used|api has not been used|quota|rate limit|resource has been exhausted/.test(s))\n    return { category: \"Google API\", severity: \"critical\", route: \"IT\" };\n  // 2) lỗi dữ liệu do AI/người dùng → cần AP Clerk\n  if (/missing required field|invalid (vendor|billto|invoicenumber|totalamount|currency|lineitems)|ai output is not/.test(s))\n    return { category: \"data/validation\", severity: \"warning\", route: \"AP Clerk\" };\n  // 3) tạm thời — đã hết retry (retryOnFail ×3) nên vẫn cần xử lý\n  if (/429|503|502|timeout|etimedout|econnreset|fetch failed|experiencing high demand/.test(s))\n    return { category: \"transient (API)\", severity: \"warning\", route: \"AP Clerk\" };\n  // 4) không rõ → coi như nghiêm trọng\n  return { category: \"unknown\", severity: \"critical\", route: \"IT\" };\n}\n\nconst cls = classify();\nconst node = ex.lastNodeExecuted || \"(unknown node)\";\nconst exId = ex.id || \"\";\nconst ts = new Date().toISOString();\nconst excId = \"EXC-\" + ts.replace(/[-:T.Z]/g, \"\").slice(0, 14) + \"-\" + String(exId).slice(-4);\n\nconst execUrl = ex.url\n  || (\"http://127.0.0.1:5678/workflow/\" + String(wf.id || \"\") + \"/executions/\" + String(exId));\n\nconst severityIcon = { critical: \":rotating_light:\", warning: \":warning:\", info: \":information_source:\" };\n\nreturn [{\n  json: {\n    exceptionId: excId,\n    timestamp: ts,\n    executionId: exId,\n    failedNode: node,\n    category: cls.category,\n    severity: cls.severity,\n    route: cls.route,\n    errorMessage: msg,\n    errorName: err.name || \"\",\n    errorStack: stack.slice(0, 2000),\n    executionUrl: execUrl,\n    retryOf: ex.retryOf || \"\",\n    mode: ex.mode || \"\",\n    workflowName: wf.name || \"\",\n    workflowId: wf.id || \"\",\n    status: \"Open\",\n    resolution: \"\",\n    notes: \"\",\n    slackText:\n      severityIcon[cls.severity] + \" *Workflow Error — \" + cls.severity.toUpperCase() + \"*\\n\"\n      + \"Exception: `\" + excId + \"` (route: \" + cls.route + \")\\n\"\n      + \"Workflow: \" + (wf.name || \"?\") + \" (\" + (wf.id || \"?\") + \")\\n\"\n      + \"Failed node: `\" + node + \"`\\n\"\n      + \"Category: \" + cls.category + \"\\n\"\n      + \"Error: \" + msg.slice(0, 400) + \"\\n\"\n      + \"Mode: \" + (ex.mode || \"?\") + (ex.retryOf ? \" (retry of \" + ex.retryOf + \")\" : \"\") + \"\\n\"\n      + \"Execution: \" + execUrl + \"\\n\"\n      + \"_DLQ: hang da ghi vao tab Exceptions_\",\n  },\n}];"
+        }
+      },
+      {
+        "id": "e2000000-0000-0000-0000-000000000003",
+        "name": "Write DLQ Record",
+        "type": "n8n-nodes-base.googleSheets",
+        "typeVersion": 4,
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
+        "position": [
+          700,
+          300
+        ],
+        "parameters": {
+          "operation": "appendOrUpdate",
+          "authentication": "serviceAccount",
+          "documentId": {
+            "__rl": true,
+            "mode": "id",
+            "value": "14c2eWIy0D1I_iwI5G_L7RuOHsilyue85sfRUsm9Qmsk"
+          },
+          "sheetName": {
+            "__rl": true,
+            "mode": "name",
+            "value": "Exceptions"
+          },
+          "columns": {
+            "mappingMode": "defineBelow",
+            "value": {
+              "Exception ID": "={{ $json.exceptionId }}",
+              "Timestamp": "={{ $json.timestamp }}",
+              "Execution ID": "={{ $json.executionId }}",
+              "Failed Node": "={{ $json.failedNode }}",
+              "Category": "={{ $json.category }}",
+              "Severity": "={{ $json.severity }}",
+              "Error Message": "={{ $json.errorMessage }}",
+              "Execution URL": "={{ $json.executionUrl }}",
+              "Retry Of": "={{ $json.retryOf }}",
+              "Mode": "={{ $json.mode }}",
+              "Status": "={{ $json.status }}",
+              "Resolution": "={{ $json.resolution }}",
+              "Notes": "={{ $json.notes }}"
+            },
+            "matchingColumns": [
+              "Exception ID"
+            ]
+          },
+          "options": {}
+        },
+        "credentials": {
+          "googleApi": {
+            "id": "zPP2IPZNZfgpsMjp",
+            "name": "Google Sheets Service Account"
+          }
+        }
+      },
+      {
+        "id": "e2000000-0000-0000-0000-000000000004",
+        "name": "Notify Team",
+        "webhookId": "736ea4a2-d81e-4829-8e57-2319494ecb0b",
+        "type": "n8n-nodes-base.slack",
+        "typeVersion": 2,
+        "retryOnFail": true,
+        "maxTries": 3,
+        "waitBetweenTries": 2000,
+        "position": [
+          940,
+          300
+        ],
+        "parameters": {
+          "resource": "message",
+          "operation": "post",
+          "select": "channel",
+          "channelId": {
+            "mode": "name",
+            "value": "#all-n8nreceipt"
+          },
+          "text": "={{ $json.slackText }}",
+          "options": {}
+        },
+        "credentials": {
+          "slackApi": {
+            "id": "bAVJK6Js9dbqrFE5",
+            "name": "Slack API - Invoice Bot"
+          }
+        }
+      }
+    ],
+    "connections": {
+      "Error Trigger": {
+        "main": [
+          [
+            {
+              "node": "Classify & Format",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Classify & Format": {
+        "main": [
+          [
+            {
+              "node": "Write DLQ Record",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      },
+      "Write DLQ Record": {
+        "main": [
+          [
+            {
+              "node": "Notify Team",
+              "type": "main",
+              "index": 0
+            }
+          ]
+        ]
+      }
+    },
+    "nodeGroups": [],
+    "authors": "Tuan Phong Do",
+    "name": null,
+    "description": null,
+    "autosaved": false,
+    "createdAt": "2026-10-11T02:16:36.797Z",
+    "updatedAt": "2026-10-11T02:16:36.797Z",
+    "workflowPublishHistory": [
+      {
+        "id": 31,
+        "workflowId": "U84rJVpHTLNOA68Q",
+        "versionId": "2f9d084b-deee-452e-9297-ed12e377cb82",
+        "event": "activated",
+        "userId": "aae16d89-cbc7-4de0-911c-34d2e3c5c832",
+        "createdAt": "2026-10-11T02:16:36.847Z"
+      }
+    ]
+  }
+}

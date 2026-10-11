@@ -82,21 +82,21 @@ flowchart TD
     subgraph REGION["⬚ Interruptible activity region — xử lý chính"]
         A(["📥 Receive Invoice<br/>Webhook POST /invoice-incoming"])
         A -->|"◉ body.invoiceText"| B(["🤖 AI Extract Invoice<br/>Google Gemini 3.5-flash-lite<br/>HTTP POST :generateContent"])
-        B -->|"◉ JSON: 13 keys"| C(["✅ Validate & Format<br/>check required fields · mathCheck"])
+        B -->|"◉ JSON: 13 keys"| C(["✅ Validate & Format<br/>check required fields · mathCheck<br/>sinh Dedup Key"])
 
         C ==>|"[1] ◉ validated row"| D(["📊 Log Invoice<br/>Google Sheets append<br/>Status = Pending"])
         D --> FFD(("✕"))
         C ==>|"[2] ◉ validated row"| E(["💬 Notify Team<br/>Slack"])
         E --> FFE(("✕"))
-        C ==>|"[3] ◉ validated row"| F{"💰 totalAmount > 1000?"}
+        C ==>|"[3] ◉ validated row"| F{"💰 totalAmount > 1000 or mathCheck != OK?"}
 
-        F -->|"✔ [totalAmount > 1000]"| G(["💬 Request Approval<br/>Slack + $execution.resumeUrl"])
+        F -->|"✔ [totalAmount > 1000] [or]"| G(["💬 Request Approval<br/>Slack + $execution.resumeUrl"])
         G --> H(["⏳ Wait for Approval<br/>webhook POST · pauses execution"])
         H --> M{"Approval result<br/>POST {invoiceNumber, status}"}
         M -->|"◉ [status = Approved]"| I(["📊 Update Invoice Status<br/>match on Invoice Number<br/>→ body.status"])
         M -->|"◉ [else]"| I
 
-        F -->|"✘ [totalAmount <= 1000]"| J(["📊 Auto-Approve<br/>match on Invoice Number → Approved"])
+        F -->|"✘ [totalAmount <= 1000 and mathCheck = OK]"| J(["📊 Auto-Approve<br/>match on Invoice Number → Approved"])
     end
 
     I --> K((⊕))
@@ -120,7 +120,7 @@ flowchart TD
 - Edge label `◉ data` = object flow (data token) — dữ liệu chạy giữa các action.
 - **AI Extract Invoice** gọi Gemini 3.5-flash-lite (`:generateContent`) và nhận JSON **13 keys** (12 fields + `lineItems`) tại path `candidates[0].content.parts[0].text`. Chi tiết các field xem phần *Data flow* bên dưới.
 - **Validate & Format** tính `calcSubtotal = Σ lineItems`, `calcTotal = subtotal + taxAmount`, `mathCheck = OK / MISMATCH` — công thức đầy đủ ở phần *Kiểm tra toán học*, không lặp lại trong node.
-- Edge label `[condition]` = guard (trên edge, evaluated at runtime). Quy ước: node `F` dùng cặp guard **exhaustive** (`>` và `<=`) nên viết phủ định đầy đủ; node `M` dùng `[status = Approved]` + `[else]` vì giá trị `status` không exhaustive (có thể là chuỗi bất kỳ) — `[else]` đảm bảo token luôn đi đến final node, khớp implementation (node Update nhận mọi giá trị status).
+- Edge label `[condition]` = guard (trên edge, evaluated at runtime). Quy ước: node `F` gồm **2 guard OR** (`totalAmount > 1000` HOẶC `mathCheck != OK`) — mọi hóa đơn lệch số học hoặc giá trị cao đều đi nhánh duyệt, chỉ tự động duyệt khi cả hai điều kiện đều không được thoả; node `M` dùng `[status = Approved]` + `[else]` vì giá trị `status` không exhaustive (có thể là chuỗi bất kỳ) — `[else]` đảm bảo token luôn đi đến final node, khớp implementation (node Update nhận mọi giá trị status).
 - **Validate & Format fan-out (`==>`, implicit fork):** 1 action sinh nhiều token ra 3 nhánh. `Log Invoice` → **FlowFinalNode ✕**, `Notify Team` → **FlowFinalNode ✕** (cả 2 terminal, token vô hiệu, không chặn nhánh khác); `High Value?` tiếp tục điều hướng. n8n thực thi **tuần tự** đúng thứ tự [1] → [2] → [3].
 - **Lý do fan-out:** `Log Invoice` (Sheets append) và `Notify Team` (Slack) đều trả về **API response**, thay thế data chain. Nếu nối tiếp tuyến tính (Log → Notify → High Value?), node sau nhận undefined → rẽ sai nhánh + message thiếu dữ liệu.
 - **1 action `Update Invoice Status`, 2 incoming guarded edge:** implementation chỉ có 1 node n8n và **không có decision** sau Wait — node nhận mọi giá trị `$json.body.status`. Mô hình hóa outcome thành decision với `[status = Approved]` + `[else]` là cách trừu tượng hóa business process (Approved được ghi rõ, cần lưu ý mọi giá trị khác đều đi qua).
@@ -152,12 +152,12 @@ flowchart TD
         C ==> E(["💬 Notify Team<br/>Slack"])
         E --> FFE(("✕"))
         C ==> F{"totalAmount > 1000?"}
-        F -->|"✔ [totalAmount > 1000]"| G(["💬 Request Approval<br/>+ $execution.resumeUrl"])
+        F -->|"✔ [totalAmount > 1000] ║ [mathCheck != OK]"| G(["💬 Request Approval<br/>+ $execution.resumeUrl<br/>⏱ chờ tối đa 7 ngày"])
         G --> H(["⏳ Wait for Approval<br/>POST resumeUrl"])
         MD{"Approval result"}
         MD -->|"◉ [status = Approved]"| I(["📊 Update Invoice Status<br/>→ Approved"])
         MD -->|"◉ [else]"| I
-        F -->|"✘ [totalAmount <= 1000]"| J(["📊 Auto-Approve → Approved"])
+        F -->|"✘ [totalAmount <= 1000 and mathCheck = OK]"| J(["📊 Auto-Approve → Approved"])
         I --> K((⊕))
         J --> K
         C -.->|"«interrupt» any node fails"| X(["⚠️ Exception Handler<br/>= Error Trigger workflow"])
@@ -189,13 +189,13 @@ flowchart TD
 |---|---|---|
 | Webhook | `{ invoiceText, fileName }` (từ client) | nested trong `body`: `body.invoiceText` |
 | AI Extract | `body.invoiceText` (expression `$json.body.X \|\| $json.X`) | `candidates[0].content.parts[0].text` → JSON |
-| Validate | Gemini JSON | validated row (flat) + `mathCheck` |
-| **Log Invoice** | validated row (fan-out [1]) | Sheets API response — row appended, Status = Pending → **FlowFinalNode** |
+| Validate | Gemini JSON | validated row (flat) + `mathCheck` + **`dedupKey` = "VENDOR\|INVOICE"** |
+| **Log Invoice** | validated row (fan-out [1]) | **`appendOrUpdate`** theo `Dedup Key` — gửi lại cùng hóa đơn cập nhật dòng cũ (không trùng) → **FlowFinalNode** |
 | **Notify Team** | validated row (fan-out [2]) | Slack API response → **FlowFinalNode** |
 | **High Value?** | validated row (fan-out [3]) | true / false branch |
 | Request Approval | validated row | Slack API response (message có `resumeUrl`) |
-| Wait for Approval | execution paused | dừng, chờ POST vào `$execution.resumeUrl` |
-| Update Invoice Status | **`body.invoiceNumber` + `body.status`** (nested sau resume) | Sheets row → **ghi đúng giá trị `body.status`** (thường là Approved/Rejected, nhưng mọi giá trị đều ghi được) — match `columns.matchingColumns = ["Invoice Number"]` |
+| Wait for Approval | execution paused | dừng chờ POST vào `$execution.resumeUrl`, **tối đa 7 ngày** (`limitWaitTime`) |
+| Update Invoice Status | **`body.dedupKey` + `body.status`** (nested sau resume) | Sheets row → **ghi đúng giá trị `body.status`** (thường là Approved/Rejected, nhưng mọi giá trị đều ghi được) — match `columns.matchingColumns = ["Invoice Number"]` |
 | Auto-Approve | validated row `$json.invoiceNumber` | Sheets row → Approved (match Invoice Number) |
 | **Exception Handler** *(workflow riêng: Invoice Error Handler)* | exception (bất kỳ node fail) | Slack `#all-n8nreceipt` (workflow name/ID, failed node, error message, execution URL) |
 
